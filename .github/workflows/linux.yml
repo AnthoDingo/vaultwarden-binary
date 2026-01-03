@@ -1,0 +1,58 @@
+name: Build Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build"
+        required: true
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Vaultwarden
+      uses: actions/checkout@v4
+      with:
+        repository: dani-garcia/vaultwarden
+        ref: ${{ github.event.inputs.version }}
+
+    - name: Update Cargo.toml
+      run: |
+        version="${{ github.event.inputs.version }}"
+        awk -v ver="$version" '
+          /^\[package\]/ { inpackage=1 }
+          /^\[/ && !/^\[package\]/ { inpackage=0 }
+          inpackage && /^version =/ { print "version = \"" ver "\""; next }
+          { print }
+        ' Cargo.toml > Cargo.new
+        mv Cargo.new Cargo.toml
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          build-essential \
+          pkg-config \
+          libssl-dev \
+          libmysqlclient-dev \
+          libpq-dev
+
+
+    - name: Build Vaultwarden
+      run: cargo build --release --features sqlite,mysql,postgresql
+
+    - name: Upload artefacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: vaultwarden-linux-${{ github.event.inputs.version }}
+        path: target/release/vaultwarden

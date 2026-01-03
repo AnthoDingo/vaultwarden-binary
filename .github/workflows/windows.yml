@@ -1,0 +1,196 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build"
+        required: true
+
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      force_refresh:
+        description: "Force vcpkg cache refresh"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Vaultwarden
+      uses: actions/checkout@v4
+      with:
+        repository: dani-garcia/vaultwarden
+        ref: ${{ github.event.inputs.version == 'latest' && 'main' || github.event.inputs.version }}
+
+    # ------------------------------------------------------------
+    # Patch Cargo.toml
+    # ------------------------------------------------------------
+    - name: Update Cargo.toml
+      shell: pwsh
+      run: |
+        $version = "${{ github.event.inputs.version }}"
+        $inPackage = $false
+        $newContent = @()
+
+        foreach ($line in Get-Content Cargo.toml) {
+            if ($line -match '^\[package\]') {
+                $inPackage = $true
+            }
+            elseif ($line -match '^\[') {
+                $inPackage = $false
+            }
+
+            if ($inPackage -and $line -match '^version\s*=') {
+                $newContent += "version = `"$version`""
+            } else {
+                $newContent += $line
+            }
+        }
+
+        $newContent | Set-Content Cargo.toml
+
+        if (-not (Select-String -Path Cargo.toml -Pattern "winres")) {
+          Add-Content Cargo.toml "`n[build-dependencies]`nwinres = `"0.1`"`n"
+        }
+
+    # ------------------------------------------------------------
+    # Generate Windows resource file
+    # ------------------------------------------------------------
+    - name: Generate Windows resource file
+      shell: pwsh
+      run: |
+        $version = "${{ github.event.inputs.version }}"
+        $verParts = $version.Split(".")
+        if ($verParts.Count -lt 3) { $verParts += "0" }
+
+        @"
+        1 VERSIONINFO
+        FILEVERSION $($verParts[0]),$($verParts[1]),$($verParts[2]),0
+        PRODUCTVERSION $($verParts[0]),$($verParts[1]),$($verParts[2]),0
+        BEGIN
+          BLOCK "StringFileInfo"
+          BEGIN
+            BLOCK "040904E4"
+            BEGIN
+              VALUE "CompanyName", "Vaultwarden"
+              VALUE "FileDescription", "Vaultwarden Server"
+              VALUE "FileVersion", "$version"
+              VALUE "ProductVersion", "$version"
+              VALUE "OriginalFilename", "vaultwarden.exe"
+              VALUE "LegalCopyright", "GPL-3.0 License"
+              VALUE "LegalTrademarks", "Vaultwarden"
+              VALUE "Comments", "Self-hosted Bitwarden-compatible server"
+            END
+          END
+          BLOCK "VarFileInfo"
+          BEGIN
+            VALUE "Translation", 0x0409, 1252
+          END
+        END
+        "@ | Set-Content vaultwarden.rc
+
+    # ------------------------------------------------------------
+    # Patch build.rs
+    # ------------------------------------------------------------
+    - name: Patch build.rs to include winres
+      shell: pwsh
+      run: |
+        $build = Get-Content build.rs -Raw
+
+        if ($build -notmatch "WindowsResource") {
+          $injection = "    if cfg!(target_os = `"windows`") {
+            let mut res = winres::WindowsResource::new();
+            res.set_resource_file(`"vaultwarden.rc`");
+            res.compile().unwrap();
+          }"
+
+          # Inject= before last '}' of main function 
+          $patched = $build -replace "(fn main\(\)\s*\{)", "`$1`n$injection"
+          $patched | Set-Content build.rs
+        }
+
+    # ------------------------------------------------------------
+    # Rust toolchain
+    # ------------------------------------------------------------
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    # ------------------------------------------------------------
+    # Install vcpkg
+    # ------------------------------------------------------------
+    - name: Install vcpkg
+      uses: lukka/run-vcpkg@v11.5
+      with:
+        vcpkgGitCommitId: "84bab45d415d22042bd0b9081aea57f362da3f35" # vcpkg commit as of 2025-12-12
+
+
+    # ------------------------------------------------------------
+    # Cache vcpkg
+    # ------------------------------------------------------------
+    - name: Cache vcpkg
+      id: cache-vcpkg
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.VCPKG_ROOT }}/installed
+          ${{ env.VCPKG_ROOT }}/packages
+          ${{ env.VCPKG_ROOT }}/buildtrees
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('Cargo.toml') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-
+
+    # ------------------------------------------------------------
+    # Install dependencies only if cache miss
+    # ------------------------------------------------------------
+    - name: Install vcpkg dependencies
+      if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        vcpkg install openssl:x64-windows
+        vcpkg install libmysql:x64-windows
+        vcpkg install libpq:x64-windows
+        if(!(Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\mysqlclient.lib")) {
+          Copy-Item -Path "$env:VCPKG_ROOT\installed\x64-windows\lib\libmysql.lib" -Destination "$env:VCPKG_ROOT\installed\x64-windows\lib\mysqlclient.lib" -Force
+        }
+
+    # ------------------------------------------------------------
+    # Export environment variables (always)
+    # ------------------------------------------------------------
+    - name: Set environment variables
+      shell: pwsh
+      run: |
+        echo "VCPKG_DEFAULT_TRIPLET=x64-windows" >> $env:GITHUB_ENV
+        echo "VCPKG_CRT_LINKAGE=dynamic" >> $env:GITHUB_ENV
+
+        echo "OPENSSL_DIR=$env:VCPKG_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
+        echo "OPENSSL_STATIC=0" >> $env:GITHUB_ENV
+
+        echo "MYSQLCLIENT_LIB_DIR=$env:VCPKG_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
+        echo "MYSQLCLIENT_INCLUDE_DIR=$env:VCPKG_ROOT\installed\x64-windows\include" >> $env:GITHUB_ENV
+        echo "MYSQLCLIENT_VERSION=8.0" >> $env:GITHUB_ENV
+
+        echo "LIBPQ_LIB_DIR=$env:VCPKG_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
+        echo "LIBPQ_INCLUDE_DIR=$env:VCPKG_ROOT\installed\x64-windows\include" >> $env:GITHUB_ENV
+
+    # ------------------------------------------------------------
+    # Build Vaultwarden
+    # ------------------------------------------------------------
+    - name: Build Vaultwarden
+      shell: pwsh
+      run: cargo build --release --features sqlite,mysql,postgresql
+
+    # ------------------------------------------------------------
+    # Upload artefacts
+    # ------------------------------------------------------------
+    - name: Upload artefacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: vaultwarden-windows-${{ github.event.inputs.version }}
+        path: target/release/vaultwarden.exe
