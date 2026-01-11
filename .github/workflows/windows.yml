@@ -156,9 +156,6 @@ jobs:
         vcpkg install openssl:x64-windows-static-md
         vcpkg install libmysql:x64-windows-static-md
         vcpkg install libpq:x64-windows-static-md
-        if(!(Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static\lib\mysqlclient.lib")) {
-          Copy-Item -Path "$env:VCPKG_ROOT\installed\x64-windows-static\lib\libmysql.lib" -Destination "$env:VCPKG_ROOT\installed\x64-windows-static\lib\mysqlclient.lib" -Force
-        }
 
     # ------------------------------------------------------------
     # Export environment variables (always)
