@@ -153,11 +153,11 @@ jobs:
       if: steps.cache-vcpkg.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
-        vcpkg install openssl:x64-windows
-        vcpkg install libmysql:x64-windows
-        vcpkg install libpq:x64-windows
-        if(!(Test-Path "$env:VCPKG_ROOT\installed\x64-windows\lib\mysqlclient.lib")) {
-          Copy-Item -Path "$env:VCPKG_ROOT\installed\x64-windows\lib\libmysql.lib" -Destination "$env:VCPKG_ROOT\installed\x64-windows\lib\mysqlclient.lib" -Force
+        vcpkg install openssl:x64-windows-static-md
+        vcpkg install libmysql:x64-windows-static-md
+        vcpkg install libpq:x64-windows-static-md
+        if(!(Test-Path "$env:VCPKG_ROOT\installed\x64-windows-static\lib\mysqlclient.lib")) {
+          Copy-Item -Path "$env:VCPKG_ROOT\installed\x64-windows-static\lib\libmysql.lib" -Destination "$env:VCPKG_ROOT\installed\x64-windows-static\lib\mysqlclient.lib" -Force
         }
 
     # ------------------------------------------------------------
@@ -166,19 +166,18 @@ jobs:
     - name: Set environment variables
       shell: pwsh
       run: |
-        echo "VCPKG_DEFAULT_TRIPLET=x64-windows" >> $env:GITHUB_ENV
+        echo "VCPKG_DEFAULT_TRIPLET=x64-windows-static-md" >> $env:GITHUB_ENV
         echo "VCPKG_CRT_LINKAGE=dynamic" >> $env:GITHUB_ENV
 
-        echo "OPENSSL_DIR=$env:VCPKG_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
-        echo "OPENSSL_STATIC=0" >> $env:GITHUB_ENV
+        echo "OPENSSL_DIR=$env:VCPKG_ROOT\installed\x64-windows-static-md" >> $env:GITHUB_ENV
+        echo "OPENSSL_STATIC=1" >> $env:GITHUB_ENV
 
-        echo "MYSQLCLIENT_LIB_DIR=$env:VCPKG_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
-        echo "MYSQLCLIENT_INCLUDE_DIR=$env:VCPKG_ROOT\installed\x64-windows\include" >> $env:GITHUB_ENV
+        echo "MYSQLCLIENT_LIB_DIR=$env:VCPKG_ROOT\installed\x64-windows-static-md\lib" >> $env:GITHUB_ENV
+        echo "MYSQLCLIENT_INCLUDE_DIR=$env:VCPKG_ROOT\installed\x64-windows-static-md\include" >> $env:GITHUB_ENV
         echo "MYSQLCLIENT_VERSION=8.0" >> $env:GITHUB_ENV
 
-        echo "LIBPQ_LIB_DIR=$env:VCPKG_ROOT\installed\x64-windows\lib" >> $env:GITHUB_ENV
-        echo "LIBPQ_INCLUDE_DIR=$env:VCPKG_ROOT\installed\x64-windows\include" >> $env:GITHUB_ENV
-
+        echo "LIBPQ_LIB_DIR=$env:VCPKG_ROOT\installed\x64-windows-static-md\lib" >> $env:GITHUB_ENV
+        echo "LIBPQ_INCLUDE_DIR=$env:VCPKG_ROOT\installed\x64-windows-static-md\include" >> $env:GITHUB_ENV
     # ------------------------------------------------------------
     # Build Vaultwarden
     # ------------------------------------------------------------
